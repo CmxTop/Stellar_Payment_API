@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
+import PaymentDetailModal from "@/components/PaymentDetailModal";
 
 interface Payment {
   id: string;
@@ -30,6 +30,8 @@ export default function RecentPayments() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [hydrated, setHydrated] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Hydrate component to avoid SSR mismatch when accessing localStorage
   useEffect(() => {
@@ -82,6 +84,16 @@ export default function RecentPayments() {
     return () => controller.abort();
   }, [page, hydrated]);
 
+  const handlePaymentClick = (paymentId: string) => {
+    setSelectedPayment(paymentId);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedPayment(null);
+  };
+
   if (loading) {
     return (
       <div className="animate-pulse space-y-3">
@@ -94,11 +106,70 @@ export default function RecentPayments() {
 
   if (error) {
     return (
-      <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-6 text-center">
-        <p className="text-sm text-yellow-400">{error}</p>
-        <p className="mt-2 text-xs text-slate-500">
-          Make sure the backend is running and the payments endpoint is available.
-        </p>
+      <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-8 text-center">
+        {/* Error State Illustration */}
+        <div className="mx-auto mb-6 w-24 h-24 relative">
+          <div className="absolute inset-0 bg-yellow-500/10 rounded-full blur-xl animate-pulse" />
+          <div className="relative w-full h-full flex items-center justify-center">
+            <svg 
+              className="w-12 h-12 text-yellow-400" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={1.5} 
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.502 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" 
+              />
+            </svg>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold text-white">Connection Error</h3>
+            <p className="text-sm text-yellow-400">{error}</p>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              Make sure the backend is running and the payments endpoint is available.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+            <button
+              onClick={() => window.location.reload()}
+              className="inline-flex items-center gap-2 rounded-lg bg-yellow-500/20 border border-yellow-500/30 px-4 py-2 text-sm font-medium text-yellow-400 transition-all hover:bg-yellow-500/30"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Retry Connection
+            </button>
+
+            <button
+              onClick={() => window.open('https://webhook.site', '_blank')}
+              className="inline-flex items-center gap-2 rounded-lg border border-mint/30 bg-mint/5 px-4 py-2 text-sm font-medium text-mint transition-all hover:bg-mint/10"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Test Webhook Anyway
+            </button>
+          </div>
+
+          <div className="mt-4 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/5">
+            <div className="flex items-start gap-3">
+              <div className="w-2 h-2 rounded-full bg-yellow-400 mt-1.5 flex-shrink-0" />
+              <div className="text-left">
+                <p className="text-xs font-medium text-yellow-400">Troubleshooting Tip</p>
+                <p className="text-xs text-slate-500">
+                  You can still test webhook functionality while backend services are being restored.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -106,10 +177,69 @@ export default function RecentPayments() {
   if (payments.length === 0) {
     return (
       <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center">
-        <p className="text-sm text-slate-400">No payments yet.</p>
-        <p className="mt-1 text-xs text-slate-500">
-          Payments will appear here once they are created via the API.
-        </p>
+        {/* Empty State Illustration */}
+        <div className="mx-auto mb-6 w-24 h-24 relative">
+          <div className="absolute inset-0 bg-mint/10 rounded-full blur-xl" />
+          <div className="relative w-full h-full flex items-center justify-center">
+            <svg 
+              className="w-12 h-12 text-mint/60" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={1.5} 
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" 
+              />
+            </svg>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <h3 className="text-lg font-semibold text-white">No payments yet</h3>
+            <p className="text-sm text-slate-400 max-w-md mx-auto">
+              Start accepting payments by creating your first payment link or testing webhooks to see transaction data flow.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+            <button
+              onClick={() => window.open('/dashboard/create', '_self')}
+              className="group relative inline-flex items-center gap-2 rounded-lg bg-mint px-4 py-2 text-sm font-medium text-black transition-all hover:bg-glow"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Create Payment Link
+              <div className="absolute inset-0 -z-10 bg-mint/20 opacity-0 blur-xl transition-opacity group-hover:opacity-100" />
+            </button>
+
+            <button
+              onClick={() => window.open('https://webhook.site', '_blank')}
+              className="inline-flex items-center gap-2 rounded-lg border border-mint/30 bg-mint/5 px-4 py-2 text-sm font-medium text-mint transition-all hover:bg-mint/10"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              Send Test Webhook
+            </button>
+          </div>
+
+          <div className="mt-6 p-4 rounded-lg border border-slate-700/50 bg-slate-800/30">
+            <div className="flex items-start gap-3">
+              <div className="w-2 h-2 rounded-full bg-mint mt-1.5 flex-shrink-0" />
+              <div className="text-left space-y-1">
+                <p className="text-xs font-medium text-mint">Getting Started Guide</p>
+                <p className="text-xs text-slate-400">
+                  Use webhook tools to test payment notifications and see real-time data appear in this dashboard.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -117,6 +247,7 @@ export default function RecentPayments() {
   return (
     <div className="flex flex-col gap-4">
       {/* Table */}
+    <>
       <div className="overflow-x-auto rounded-xl border border-white/10">
         <table className="w-full text-left text-sm">
           <thead>
@@ -142,7 +273,8 @@ export default function RecentPayments() {
             {payments.map((payment) => (
               <tr
                 key={payment.id}
-                className="transition-colors hover:bg-white/5"
+                className="transition-colors hover:bg-white/5 cursor-pointer"
+                onClick={() => handlePaymentClick(payment.id)}
               >
                 <td className="px-4 py-3">
                   <span
@@ -165,74 +297,27 @@ export default function RecentPayments() {
                   {new Date(payment.created_at).toLocaleDateString()}
                 </td>
                 <td className="px-4 py-3">
-                  <Link
-                    href={`/pay/${payment.id}`}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePaymentClick(payment.id);
+                    }}
                     className="font-mono text-xs text-mint transition-colors hover:text-glow"
                   >
                     View →
-                  </Link>
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {/* Pagination Footer */}
-      {totalPages > 0 && (
-        <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-400">
-              <span className="font-medium text-white">{totalCount}</span> total
-              {totalCount !== 1 ? "s" : ""} •{" "}
-              <span className="font-medium text-white">
-                {(page - 1) * LIMIT + 1}
-              </span>
-              –
-              <span className="font-medium text-white">
-                {Math.min(page * LIMIT, totalCount)}
-              </span>
-            </div>
-            <div className="text-xs font-mono text-slate-500">
-              Page <span className="text-white">{page}</span> of{" "}
-              <span className="text-white">{totalPages}</span>
-            </div>
-          </div>
-
-          {/* Pagination Controls */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              ← Previous
-            </button>
-            <div className="hidden gap-1 sm:flex">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setPage(p)}
-                  className={`rounded-md px-2.5 py-2 text-xs font-medium transition-colors ${
-                    page === p
-                      ? "bg-mint text-black"
-                      : "border border-white/10 text-slate-400 hover:bg-white/5"
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-              className="flex-1 rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-400 transition-colors hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+      
+      <PaymentDetailModal
+        paymentId={selectedPayment || ""}
+        isOpen={isModalOpen}
+        onClose={closeModal}
+      />
+    </>
   );
 }
