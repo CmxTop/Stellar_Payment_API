@@ -27,6 +27,8 @@ interface PaymentDetails {
   asset_issuer: string | null;
   recipient: string;
   description: string | null;
+  memo?: string | null;
+  memo_type?: string | null;
   status: string; // pending | confirmed | completed | failed
   tx_id: string | null;
   created_at: string;
@@ -99,6 +101,26 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function buildSep7Uri(payment: PaymentDetails) {
+  const params = new URLSearchParams({
+    destination: payment.recipient,
+    amount: String(payment.amount),
+    asset_code: payment.asset.toUpperCase(),
+  });
+
+  if (payment.asset_issuer) {
+    params.set("asset_issuer", payment.asset_issuer);
+  }
+  if (payment.memo) {
+    params.set("memo", payment.memo);
+  }
+  if (payment.memo_type) {
+    params.set("memo_type", payment.memo_type);
+  }
+
+  return `web+stellar:pay?${params.toString()}`;
+}
+
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 /**
@@ -165,6 +187,7 @@ export default function PaymentPage() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [freighterReady, setFreighterReady] = useState(false);
+  const [showRawIntent, setShowRawIntent] = useState(false);
 
   const { isProcessing, status: txStatus, error: paymentError, processPayment } = usePayment();
 
@@ -367,6 +390,23 @@ export default function PaymentPage() {
         <p className="text-center text-xs text-slate-500">
           Scan with Freighter or any Stellar wallet
         </p>
+        <div className="sm:hidden">
+          <button
+            type="button"
+            onClick={() => setShowRawIntent((prev) => !prev)}
+            className="mx-auto mt-2 text-xs font-medium text-mint transition-colors hover:text-glow"
+          >
+            {showRawIntent ? "Hide raw intent link" : "View raw intent link"}
+          </button>
+          {showRawIntent && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/10 bg-black/40 p-3">
+              <code className="flex-1 break-all font-mono text-[11px] text-slate-200">
+                {buildSep7Uri(payment)}
+              </code>
+              <CopyButton text={buildSep7Uri(payment)} className="mt-0.5" />
+            </div>
+          )}
+        </div>
       </div>
 
             {/* Date */}
