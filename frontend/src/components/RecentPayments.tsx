@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import PaymentDetailModal from "@/components/PaymentDetailModal";
 
 interface Payment {
   id: string;
@@ -16,6 +16,8 @@ export default function RecentPayments() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -45,6 +47,16 @@ export default function RecentPayments() {
 
     return () => controller.abort();
   }, []);
+
+  const handlePaymentClick = (paymentId: string) => {
+    setSelectedPayment(paymentId);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedPayment(null);
+  };
 
   if (loading) {
     return (
@@ -79,65 +91,77 @@ export default function RecentPayments() {
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-white/10">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-white/10 bg-white/5">
-            <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400">
-              Status
-            </th>
-            <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400">
-              Amount
-            </th>
-            <th className="hidden px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400 sm:table-cell">
-              Description
-            </th>
-            <th className="hidden px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400 md:table-cell">
-              Date
-            </th>
-            <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400">
-              Link
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-white/5">
-          {payments.map((payment) => (
-            <tr
-              key={payment.id}
-              className="transition-colors hover:bg-white/5"
-            >
-              <td className="px-4 py-3">
-                <span
-                  className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    payment.status === "confirmed"
-                      ? "bg-green-500/20 text-green-400"
-                      : "bg-yellow-500/20 text-yellow-400"
-                  }`}
-                >
-                  {payment.status}
-                </span>
-              </td>
-              <td className="px-4 py-3 font-medium text-white">
-                {payment.amount} {payment.asset}
-              </td>
-              <td className="hidden px-4 py-3 text-slate-400 sm:table-cell">
-                {payment.description || "—"}
-              </td>
-              <td className="hidden px-4 py-3 text-slate-400 md:table-cell">
-                {new Date(payment.created_at).toLocaleDateString()}
-              </td>
-              <td className="px-4 py-3">
-                <Link
-                  href={`/pay/${payment.id}`}
-                  className="font-mono text-xs text-mint transition-colors hover:text-glow"
-                >
-                  View →
-                </Link>
-              </td>
+    <>
+      <div className="overflow-x-auto rounded-xl border border-white/10">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-white/10 bg-white/5">
+              <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400">
+                Status
+              </th>
+              <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400">
+                Amount
+              </th>
+              <th className="hidden px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400 sm:table-cell">
+                Description
+              </th>
+              <th className="hidden px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400 md:table-cell">
+                Date
+              </th>
+              <th className="px-4 py-3 font-mono text-xs uppercase tracking-wider text-slate-400">
+                Link
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y divide-white/5">
+            {payments.map((payment) => (
+              <tr
+                key={payment.id}
+                className="transition-colors hover:bg-white/5 cursor-pointer"
+                onClick={() => handlePaymentClick(payment.id)}
+              >
+                <td className="px-4 py-3">
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      payment.status === "confirmed"
+                        ? "bg-green-500/20 text-green-400"
+                        : "bg-yellow-500/20 text-yellow-400"
+                    }`}
+                  >
+                    {payment.status}
+                  </span>
+                </td>
+                <td className="px-4 py-3 font-medium text-white">
+                  {payment.amount} {payment.asset}
+                </td>
+                <td className="hidden px-4 py-3 text-slate-400 sm:table-cell">
+                  {payment.description || "—"}
+                </td>
+                <td className="hidden px-4 py-3 text-slate-400 md:table-cell">
+                  {new Date(payment.created_at).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePaymentClick(payment.id);
+                    }}
+                    className="font-mono text-xs text-mint transition-colors hover:text-glow"
+                  >
+                    View →
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      
+      <PaymentDetailModal
+        paymentId={selectedPayment || ""}
+        isOpen={isModalOpen}
+        onClose={closeModal}
+      />
+    </>
   );
 }
