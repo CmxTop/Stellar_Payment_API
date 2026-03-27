@@ -35,6 +35,10 @@ const router = express.Router();
  *               notification_email:
  *                 type: string
  *                 format: email
+ *               metadata:
+ *                 type: object
+ *                 additionalProperties: true
+ *                 description: Optional free-form onboarding data (e.g. industry, country)
  *     responses:
  *       201:
  *         description: Merchant registered
@@ -82,6 +86,7 @@ router.post("/register-merchant", async (req, res, next) => {
       api_key: apiKey,
       webhook_secret: webhookSecret,
       merchant_settings: resolveMerchantSettings(body.merchant_settings),
+      metadata: body.metadata ?? null,
       created_at: new Date().toISOString()
     };
 
@@ -104,6 +109,7 @@ router.post("/register-merchant", async (req, res, next) => {
         business_name: merchant.business_name,
         notification_email: merchant.notification_email,
         merchant_settings: resolveMerchantSettings(merchant.merchant_settings),
+        metadata: merchant.metadata ?? null,
         api_key: merchant.api_key,
         webhook_secret: merchant.webhook_secret,
         created_at: merchant.created_at

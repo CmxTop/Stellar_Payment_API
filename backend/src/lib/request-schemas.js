@@ -161,6 +161,7 @@ export const registerMerchantZodSchema = z.object({
       send_success_emails: z.boolean().optional(),
     })
     .optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export const merchantProfileUpdateZodSchema = z
