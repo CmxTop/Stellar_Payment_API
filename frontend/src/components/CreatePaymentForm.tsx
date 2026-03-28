@@ -287,6 +287,9 @@ export default function CreatePaymentForm() {
   const apiKey = useMerchantApiKey();
   const hydrated = useMerchantHydrated();
   const trustedAddresses = useMerchantTrustedAddresses();
+  const [useSessionBranding, setUseSessionBranding] = useLocalStorage("payment_use_branding", false);
+  const [branding, setBranding] = useLocalStorage("payment_branding", DEFAULT_BRANDING);
+  const [selectedTrustedAddress, setSelectedTrustedAddress] = useLocalStorage("payment_trusted_address", "");
 
   // localStorage-backed state (preserved from original)
   const [useSessionBranding, setUseSessionBranding] = useLocalStorage(
@@ -303,6 +306,34 @@ export default function CreatePaymentForm() {
   );
 
   useHydrateMerchantStore();
+
+  // ── Rate-limit countdown ──────────────────────────────────
+  const [retryAfter, setRetryAfter] = useState(0);
+  const retryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (retryAfter <= 0) {
+      if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+      return;
+    }
+
+    retryTimerRef.current = setInterval(() => {
+      setRetryAfter((prev) => {
+        if (prev <= 1) {
+          clearInterval(retryTimerRef.current!);
+          retryTimerRef.current = null;
+          setError(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (retryTimerRef.current) clearInterval(retryTimerRef.current);
+    };
+  }, [retryAfter]);
+  // ──────────────────────────────────────────────────────────
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -378,6 +409,7 @@ export default function CreatePaymentForm() {
     localStorage.removeItem("payment_branding");
     localStorage.removeItem("payment_trusted_address");
     setError(null);
+    setRetryAfter(0);
   };
 
   const handleTrustedAddressSelect = (addressId: string) => {
