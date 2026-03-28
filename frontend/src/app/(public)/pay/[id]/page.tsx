@@ -3,23 +3,54 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import toast from "react-hot-toast";
-import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
-import { QRCodeSVG } from "qrcode.react";
-import "react-loading-skeleton/dist/skeleton.css";
+import { useWallet } from "@/lib/wallet-context";
+import { Spinner } from "@/components/ui/Spinner";
+import { usePayment } from "@/lib/usePayment";
+import { useAssetMetadata } from "@/lib/useAssetMetadata";
+import { createReceiptPdf } from "@/lib/receipt-pdf";
 import CheckoutQrModal from "@/components/CheckoutQrModal";
 import CopyButton from "@/components/CopyButton";
 import WalletSelector from "@/components/WalletSelector";
+import toast from "react-hot-toast";
+import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
+import "react-loading-skeleton/dist/skeleton.css";
+import { QRCodeSVG } from "qrcode.react";
 import { localeToLanguageTag } from "@/i18n/config";
-import { usePayment } from "@/lib/usePayment";
-import { useWallet } from "@/lib/wallet-context";
+import Confetti from "react-confetti";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+
+// Use Stellar.Expert as the block explorer (Horizon is an API, not an explorer).
+// Defaults to testnet; set NEXT_PUBLIC_STELLAR_NETWORK=public for mainnet.
 const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "testnet";
 const EXPLORER_BASE =
   NETWORK === "public"
     ? "https://stellar.expert/explorer/public"
     : "https://stellar.expert/explorer/testnet";
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface BrandingConfig {
+  primary_color?: string;
+  secondary_color?: string;
+  background_color?: string;
+  /**
+   * Absolute URL to the merchant's logo image.
+   * Displayed in the checkout header in place of the generic payment label.
+   * Recommended size: at least 120 × 40 px; any standard web format accepted.
+   */
+  logo_url?: string | null;
+  /**
+   * Alt text for the logo image (accessibility + SEO).
+   * Falls back to the generic "Payment Request" heading when absent.
+   */
+  logo_alt?: string | null;
+  /**
+   * Optional display name shown beneath the logo (e.g. "Acme Store").
+   * When omitted the generic heading is used.
+   */
+  merchant_name?: string | null;
+}
 
 interface PaymentDetails {
   id: string;
@@ -30,14 +61,10 @@ interface PaymentDetails {
   description: string | null;
   memo?: string | null;
   memo_type?: string | null;
-  status: string;
+  status: string; // pending | confirmed | completed | failed
   tx_id: string | null;
   created_at: string;
-  branding_config?: {
-    primary_color?: string;
-    secondary_color?: string;
-    background_color?: string;
-  } | null;
+  branding_config?: BrandingConfig | null;
 }
 
 interface PathQuote {
@@ -46,21 +73,154 @@ interface PathQuote {
   source_amount: string;
   send_max: string;
   destination_asset: string;
+  destination_asset_issuer: string | null;
   destination_amount: string;
   path: Array<{ asset_code: string; asset_issuer: string | null }>;
   slippage: number;
 }
 
-const DEFAULT_CHECKOUT_THEME = {
+// ─── Branding defaults ───────────────────────────────────────────────────────
+
+const DEFAULT_CHECKOUT_THEME: Required<
+  Pick<BrandingConfig, "primary_color" | "secondary_color" | "background_color">
+> = {
   primary_color: "#5ef2c0",
   secondary_color: "#b8ffe2",
   background_color: "#050608",
 };
 
-function AssetBadge({ asset }: { asset: string }) {
-  const normalizedAsset = asset.toUpperCase();
+/**
+ * Merge merchant branding with safe defaults.
+ * Only well-formed values from the backend override defaults.
+ */
+function resolveBranding(
+  config: BrandingConfig | null | undefined,
+): BrandingConfig & typeof DEFAULT_CHECKOUT_THEME {
+  return {
+    ...DEFAULT_CHECKOUT_THEME,
+    logo_url: null,
+    logo_alt: null,
+    merchant_name: null,
+    ...(config ?? {}),
+  };
+}
 
-  if (normalizedAsset === "XLM" || normalizedAsset === "NATIVE") {
+// ─── CSS variables helper ────────────────────────────────────────────────────
+
+/**
+ * Build the inline `style` object that injects merchant colors as CSS custom
+ * properties.  Every themed element downstream reads from these variables so a
+ * single application point drives the entire page palette.
+ */
+function buildThemeStyle(
+  branding: ReturnType<typeof resolveBranding>,
+): CSSProperties {
+  return {
+    "--checkout-primary": branding.primary_color,
+    "--checkout-secondary": branding.secondary_color,
+    "--checkout-bg": branding.background_color,
+    // Derived tokens — computed once, re-used everywhere
+    "--checkout-primary-glow": `color-mix(in srgb, var(--checkout-primary) 20%, transparent)`,
+    "--checkout-primary-subtle": `color-mix(in srgb, var(--checkout-primary) 7%, transparent)`,
+    "--checkout-primary-border": `color-mix(in srgb, var(--checkout-primary) 30%, transparent)`,
+    background:
+      "radial-gradient(1200px circle at 10% -10%, color-mix(in srgb, var(--checkout-primary) 18%, #15233b) 0%, var(--checkout-bg) 45%, #050608 100%)",
+  } as CSSProperties;
+}
+
+// ─── Merchant logo / header ───────────────────────────────────────────────────
+
+interface MerchantHeaderProps {
+  branding: ReturnType<typeof resolveBranding>;
+  paymentId: string;
+  t: ReturnType<typeof useTranslations>;
+}
+
+/**
+ * Renders the top-of-page header section.
+ *
+ * Priority order:
+ *  1. Logo image (with optional merchant name beneath)
+ *  2. Merchant name only (text fallback)
+ *  3. Generic "Payment Request" label
+ */
+function MerchantHeader({ branding, paymentId, t }: MerchantHeaderProps) {
+  const [logoError, setLogoError] = useState(false);
+
+  const showLogo = Boolean(branding.logo_url) && !logoError;
+  const altText =
+    branding.logo_alt ?? branding.merchant_name ?? t("paymentRequest");
+
+  return (
+    <header className="flex flex-col gap-2">
+      {showLogo ? (
+        <div className="flex flex-col gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={branding.logo_url!}
+            alt={altText}
+            onError={() => setLogoError(true)}
+            className="h-10 w-auto max-w-[180px] object-contain"
+            // It seems you&apos;re currently offline. Please check your connection and
+            // Prevent referrer leakage to third-party image hosts
+            referrerPolicy="no-referrer"
+          />
+          {branding.merchant_name && (
+            <p
+              className="text-xs font-semibold uppercase tracking-[0.25em]"
+              style={{ color: "var(--checkout-primary)" }}
+            >
+              {branding.merchant_name}
+            </p>
+          )}
+        </div>
+      ) : (
+        <p
+          className="font-mono text-xs uppercase tracking-[0.3em]"
+          style={{ color: "var(--checkout-primary)" }}
+        >
+          {branding.merchant_name ?? t("paymentRequest")}
+        </p>
+      )}
+
+      <h1 className="text-3xl font-bold text-white">{t("completePayment")}</h1>
+      <p className="font-mono text-xs text-slate-500 break-all">
+        ID: {paymentId}
+      </p>
+    </header>
+  );
+}
+
+// ─── Asset badge ────────────────────────────────────────────────────────────
+
+function AssetBadge({
+  asset,
+  logo,
+  name,
+}: {
+  asset: string;
+  logo?: string | null;
+  name?: string | null;
+}) {
+  const a = asset.toUpperCase();
+
+  if (logo) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={logo}
+          alt={name ?? asset}
+          className="h-8 w-8 object-contain"
+        />
+      </span>
+    );
+  }
+
+  if (a === "XLM" || a === "NATIVE") {
     return (
       <span
         aria-hidden="true"
@@ -84,8 +244,7 @@ function AssetBadge({ asset }: { asset: string }) {
       </span>
     );
   }
-
-  if (normalizedAsset === "USDC") {
+  if (a === "USDC") {
     return (
       <span
         aria-hidden="true"
@@ -95,13 +254,14 @@ function AssetBadge({ asset }: { asset: string }) {
       </span>
     );
   }
-
   return (
     <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-white/10 text-xs font-bold text-white">
       {asset.slice(0, 3)}
     </span>
   );
 }
+
+// ─── Status badge ────────────────────────────────────────────────────────────
 
 function StatusBadge({
   status,
@@ -129,19 +289,20 @@ function StatusBadge({
     },
   };
 
-  const resolvedStatus = statusMap[status.toLowerCase()] ?? {
+  const s = statusMap[status.toLowerCase()] ?? {
     label: status,
     classes: "bg-white/10 text-slate-400 border border-white/10",
   };
-
   return (
     <span
-      className={`rounded-full px-3 py-1 text-xs font-semibold ${resolvedStatus.classes}`}
+      className={`rounded-full px-3  py-1 text-xs font-semibold ${s.classes}`}
     >
-      {resolvedStatus.label}
+      {s.label}
     </span>
   );
 }
+
+// ─── SEP-0007 URI builder ────────────────────────────────────────────────────
 
 function buildSep7Uri(payment: PaymentDetails) {
   const params = new URLSearchParams({
@@ -150,30 +311,32 @@ function buildSep7Uri(payment: PaymentDetails) {
     asset_code: payment.asset.toUpperCase(),
   });
 
-  if (payment.asset_issuer) {
-    params.set("asset_issuer", payment.asset_issuer);
-  }
-  if (payment.memo) {
-    params.set("memo", payment.memo);
-  }
-  if (payment.memo_type) {
-    params.set("memo_type", payment.memo_type);
-  }
+  if (payment.asset_issuer) params.set("asset_issuer", payment.asset_issuer);
+  if (payment.memo) params.set("memo", payment.memo);
+  if (payment.memo_type) params.set("memo_type", payment.memo_type);
 
   return `web+stellar:pay?${params.toString()}`;
 }
+
+function buildReceiptFilename(paymentId: string) {
+  return `receipt-${paymentId.replace(/[^a-zA-Z0-9_-]/g, "-")}.pdf`;
+}
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function LoadingSkeleton() {
   return (
     <SkeletonTheme baseColor="#151d2e" highlightColor="#1f2d44">
       <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-8 px-6 py-16">
+        {/* Header — includes logo placeholder */}
         <header className="flex flex-col gap-2">
-          <Skeleton width={96} height={12} borderRadius={999} />
+          <Skeleton width={120} height={40} borderRadius={8} /> {/* logo */}
           <Skeleton width={220} height={36} borderRadius={10} />
           <Skeleton width={280} height={10} borderRadius={999} />
         </header>
 
-        <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur">
+        {/* Card */}
+        <div className="rounded-3xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur overflow-hidden">
           <div className="flex flex-col items-center gap-3 border-b border-white/10 px-8 py-10">
             <Skeleton circle width={40} height={40} />
             <Skeleton width={200} height={52} borderRadius={10} />
@@ -198,6 +361,8 @@ function LoadingSkeleton() {
   );
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function PaymentPage() {
   const t = useTranslations("checkout");
   const locale = localeToLanguageTag(useLocale());
@@ -210,6 +375,19 @@ export default function PaymentPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [showRawIntent, setShowRawIntent] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [isDownloadingReceipt, setIsDownloadingReceipt] = useState(false);
+
+  useEffect(() => {
+    if (
+      payment &&
+      (payment.status === "confirmed" || payment.status === "completed")
+    ) {
+      setShowConfetti(true);
+    }
+  }, [payment]);
+
+  // Path payment state
   const [usePathPayment, setUsePathPayment] = useState(false);
   const [pathQuote, setPathQuote] = useState<PathQuote | null>(null);
   const [pathQuoteLoading, setPathQuoteLoading] = useState(false);
@@ -224,6 +402,9 @@ export default function PaymentPage() {
     processPathPayment,
   } = usePayment(activeProvider);
 
+  const { assets: assetMetadata } = useAssetMetadata();
+
+  // ── Fetch payment details ──────────────────────────────────────────────────
   useEffect(() => {
     const controller = new AbortController();
 
@@ -232,20 +413,12 @@ export default function PaymentPage() {
         const res = await fetch(`${API_URL}/api/payment-status/${paymentId}`, {
           signal: controller.signal,
         });
-
-        if (res.status === 404) {
-          throw new Error(t("paymentMissing"));
-        }
-        if (!res.ok) {
-          throw new Error(t("loadFailed"));
-        }
-
+        if (res.status === 404) throw new Error(t("paymentMissing"));
+        if (!res.ok) throw new Error(t("loadFailed"));
         const data = await res.json();
         setPayment(data.payment);
       } catch (err: unknown) {
-        if (err instanceof Error && err.name === "AbortError") {
-          return;
-        }
+        if (err instanceof Error && err.name === "AbortError") return;
         setFetchError(
           err instanceof Error ? err.message : t("loadPaymentFailed"),
         );
@@ -255,64 +428,89 @@ export default function PaymentPage() {
     };
 
     load();
-
     return () => controller.abort();
   }, [paymentId, t]);
 
+  // ── Real-time status updates via SSE ──────────────────────────────────────
   useEffect(() => {
     if (loading || !payment) return;
-
     const settled = ["confirmed", "completed", "failed"].includes(
       payment.status,
     );
     if (settled) return;
 
-    const intervalId = setInterval(async () => {
+    const eventSource = new EventSource(`${API_URL}/api/stream/${paymentId}`);
+
+    eventSource.addEventListener("payment.confirmed", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setPayment((prev) =>
+          prev ? { ...prev, status: data.status, tx_id: data.tx_id } : null,
+        );
+        toast.success(t("paymentConfirmed") || "Payment confirmed!");
+        eventSource.close();
+      } catch (err) {
+        console.error("Failed to parse SSE message", err);
+      }
+    });
+
+    eventSource.onerror = () => {
+      console.warn("SSE connection failed, falling back to polling.");
+      eventSource.close();
+    };
+
+    return () => eventSource.close();
+  }, [paymentId, payment, loading, t]);
+
+  // ── Polling fallback (only if not confirmed) ──────────────────────────────
+  useEffect(() => {
+    if (loading || !payment) return;
+    const settled = ["confirmed", "completed", "failed"].includes(
+      payment.status,
+    );
+    if (settled) return;
+
+    // Use a longer interval for polling fallback (e.g., 10s)
+    const id = setInterval(async () => {
       try {
         const res = await fetch(`${API_URL}/api/payment-status/${paymentId}`);
         if (!res.ok) return;
-
         const data = await res.json();
-        if (data.payment) {
+        if (data.payment && data.payment.status !== payment.status) {
           setPayment(data.payment);
         }
       } catch {
-        return;
+        /* silent — retry next tick */
       }
-    }, 5000);
+    }, 10000);
 
-    return () => clearInterval(intervalId);
-  }, [loading, payment, paymentId]);
+    return () => clearInterval(id);
+  }, [paymentId, payment, loading]);
 
+  // ── Fetch path payment quote when wallet is connected ────────────────────
   useEffect(() => {
-    if (!payment || !activeProvider || payment.status !== "pending") return;
-
-    if (
-      payment.asset.toUpperCase() === "XLM" ||
-      payment.asset.toUpperCase() === "NATIVE"
-    ) {
+    if (!payment || !activeProvider || payment.status !== "pending") {
       setPathQuote(null);
+      setPathQuoteError(null);
+      setPathQuoteLoading(false);
       setUsePathPayment(false);
       return;
     }
 
     let cancelled = false;
-
     (async () => {
       setPathQuoteLoading(true);
       setPathQuoteError(null);
-
       try {
-        const publicKey = await activeProvider.getPublicKey();
+        const pubKey = await activeProvider.getPublicKey();
         const qs = new URLSearchParams({
           source_asset: "XLM",
           source_asset_issuer: "",
-          source_account: publicKey,
+          source_account: pubKey,
         });
         const res = await fetch(
           `${API_URL}/api/path-payment-quote/${paymentId}?${qs}`,
         );
-
         if (!res.ok) {
           if (!cancelled) {
             setPathQuote(null);
@@ -320,31 +518,29 @@ export default function PaymentPage() {
           }
           return;
         }
-
-        const data = await res.json();
+        const data = (await res.json()) as PathQuote;
         if (!cancelled) {
           setPathQuote(data);
           setUsePathPayment(true);
         }
       } catch {
         if (!cancelled) {
-          setPathQuoteError(t("quoteUnavailable"));
+          setPathQuote(null);
+          setUsePathPayment(false);
+          setPathQuoteError("Could not fetch path payment quote.");
         }
       } finally {
-        if (!cancelled) {
-          setPathQuoteLoading(false);
-        }
+        if (!cancelled) setPathQuoteLoading(false);
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [activeProvider, payment, paymentId, t]);
+  }, [payment, activeProvider, paymentId]);
 
+  // ── Pay handler ───────────────────────────────────────────────────────────
   const handlePay = async () => {
     if (!payment) return;
-
     setActionError(null);
 
     try {
@@ -355,11 +551,13 @@ export default function PaymentPage() {
           recipient: payment.recipient,
           destAmount: pathQuote.destination_amount,
           destAssetCode: pathQuote.destination_asset,
-          destAssetIssuer: payment.asset_issuer,
+          destAssetIssuer: pathQuote.destination_asset_issuer,
           sendMax: pathQuote.send_max,
           sendAssetCode: pathQuote.source_asset,
           sendAssetIssuer: pathQuote.source_asset_issuer,
           path: pathQuote.path,
+          memo: payment.memo,
+          memoType: payment.memo_type,
         });
       } else {
         result = await processPayment({
@@ -367,31 +565,76 @@ export default function PaymentPage() {
           amount: String(payment.amount),
           assetCode: payment.asset,
           assetIssuer: payment.asset_issuer,
+          memo: payment.memo,
+          memoType: payment.memo_type,
         });
       }
 
       setPayment({ ...payment, status: "completed", tx_id: result.hash });
       toast.success(t("paymentSent"));
 
+      // Best-effort backend verification
       setTimeout(async () => {
         try {
           await fetch(`${API_URL}/api/verify-payment/${paymentId}`, {
             method: "POST",
           });
         } catch {
-          return;
+          /* non-critical */
         }
       }, 2000);
     } catch {
-      const message = paymentError ?? t("paymentFailed");
-      setActionError(message);
-      toast.error(message);
+      const msg = paymentError ?? t("paymentFailed");
+      setActionError(msg);
+      toast.error(msg);
     }
   };
 
-  if (loading) {
-    return <LoadingSkeleton />;
-  }
+  const handleDownloadReceipt = async () => {
+    if (!payment) return;
+
+    try {
+      setIsDownloadingReceipt(true);
+      setActionError(null);
+
+      const blob = createReceiptPdf({
+        merchantName: branding.merchant_name,
+        paymentId: payment.id,
+        amount: payment.amount.toLocaleString(locale, {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 7,
+        }),
+        asset: payment.asset.toUpperCase(),
+        status: t(`status.${payment.status.toLowerCase()}`),
+        date: new Date(payment.created_at).toLocaleString(locale, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        recipient: payment.recipient,
+        transactionHash: payment.tx_id ?? t("receiptHashUnavailable"),
+        description: payment.description,
+      });
+
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = buildReceiptFilename(payment.id);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      toast.success(t("receiptDownloaded"));
+    } catch {
+      const msg = t("receiptDownloadFailed");
+      setActionError(msg);
+      toast.error(msg);
+    } finally {
+      setIsDownloadingReceipt(false);
+    }
+  };
+
+  // ── Early returns ──────────────────────────────────────────────────────────
+  if (loading) return <LoadingSkeleton />;
 
   if (fetchError || !payment) {
     return (
@@ -413,16 +656,31 @@ export default function PaymentPage() {
     payment.status === "confirmed" || payment.status === "completed";
   const isFailed = payment.status === "failed";
   const paymentIntentUri = buildSep7Uri(payment);
-  const checkoutTheme = {
-    ...DEFAULT_CHECKOUT_THEME,
-    ...(payment.branding_config || {}),
-  };
+
+  // Resolve branding once — used by both the theme style and the header component
+  const branding = resolveBranding(payment.branding_config || {});
 
   return (
     <>
+      {showConfetti && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 100,
+            pointerEvents: "none",
+          }}
+        >
+          <Confetti recycle={false} numberOfPieces={400} />
+        </div>
+      )}
+      {/* ── Full-screen processing overlay ── */}
       {isProcessing && (
         <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-black/85 backdrop-blur-sm">
-          <div className="h-14 w-14 animate-spin rounded-full border-4 border-white/15 border-t-mint" />
+          <Spinner size="xl" />
           <div className="flex flex-col items-center gap-1 text-center">
             <p className="text-base font-semibold text-white">
               {txStatus ?? t("processingFallback")}
@@ -434,34 +692,28 @@ export default function PaymentPage() {
 
       <main
         className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-8 px-6 py-16"
-        style={
-          {
-            "--checkout-primary": checkoutTheme.primary_color,
-            "--checkout-secondary": checkoutTheme.secondary_color,
-            "--checkout-bg": checkoutTheme.background_color,
-            background:
-              "radial-gradient(1200px circle at 10% -10%, color-mix(in srgb, var(--checkout-primary) 18%, #15233b) 0%, var(--checkout-bg) 45%, #050608 100%)",
-          } as CSSProperties
-        }
+        style={buildThemeStyle(branding)}
       >
-        <header className="flex flex-col gap-2">
-          <p
-            className="font-mono text-xs uppercase tracking-[0.3em]"
-            style={{ color: "var(--checkout-primary)" }}
-          >
-            {t("paymentRequest")}
-          </p>
-          <h1 className="text-3xl font-bold text-white">
-            {t("completePayment")}
-          </h1>
-          <p className="break-all font-mono text-xs text-slate-500">
-            ID: {payment.id}
-          </p>
-        </header>
+        {/* ── Page header — merchant logo / name ── */}
+        <MerchantHeader branding={branding} paymentId={payment.id} t={t} />
 
+        {/* ── Main card ── */}
         <div className="rounded-3xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur">
+          {/* Amount hero */}
           <div className="flex flex-col items-center gap-3 border-b border-white/10 px-8 py-10">
-            <AssetBadge asset={payment.asset} />
+            <AssetBadge
+              asset={payment.asset}
+              logo={
+                assetMetadata.find(
+                  (a) => a.code === payment.asset.toUpperCase(),
+                )?.logo
+              }
+              name={
+                assetMetadata.find(
+                  (a) => a.code === payment.asset.toUpperCase(),
+                )?.name
+              }
+            />
             <div className="flex items-baseline gap-2">
               <span className="text-5xl font-bold tracking-tight text-white">
                 {payment.amount.toLocaleString(locale, {
@@ -484,7 +736,9 @@ export default function PaymentPage() {
             <StatusBadge status={payment.status} t={t} />
           </div>
 
+          {/* Details */}
           <div className="flex flex-col gap-5 p-8">
+            {/* Recipient */}
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 {t("recipient")}
@@ -497,6 +751,7 @@ export default function PaymentPage() {
               </div>
             </div>
 
+            {/* QR Code */}
             <div className="flex flex-col gap-1.5">
               <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 {t("scanToPay")}
@@ -533,12 +788,12 @@ export default function PaymentPage() {
                 </svg>
                 {t("openQrModal")}
               </button>
-
               <div className="sm:hidden">
                 <button
                   type="button"
-                  onClick={() => setShowRawIntent((previous) => !previous)}
-                  className="mx-auto mt-2 text-xs font-medium text-mint transition-colors hover:text-glow"
+                  onClick={() => setShowRawIntent((prev) => !prev)}
+                  className="mx-auto mt-2 text-xs font-medium transition-colors hover:text-glow"
+                  style={{ color: "var(--checkout-primary)" }}
                 >
                   {showRawIntent ? t("hideRawIntent") : t("viewRawIntent")}
                 </button>
@@ -553,6 +808,7 @@ export default function PaymentPage() {
               </div>
             </div>
 
+            {/* Date */}
             <div className="flex flex-col gap-1">
               <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                 {t("created")}
@@ -565,6 +821,7 @@ export default function PaymentPage() {
               </p>
             </div>
 
+            {/* Transaction hash (after payment) */}
             {payment.tx_id && (
               <div className="flex flex-col gap-1.5">
                 <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
@@ -575,7 +832,8 @@ export default function PaymentPage() {
                     href={`${EXPLORER_BASE}/tx/${payment.tx_id}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 truncate font-mono text-sm text-mint underline underline-offset-2 hover:text-glow"
+                    className="flex-1 truncate font-mono text-sm underline underline-offset-2 transition-opacity hover:opacity-80"
+                    style={{ color: "var(--checkout-primary)" }}
                   >
                     {payment.tx_id}
                   </a>
@@ -584,6 +842,7 @@ export default function PaymentPage() {
               </div>
             )}
 
+            {/* Action error */}
             {actionError && (
               <div
                 role="alert"
@@ -593,83 +852,76 @@ export default function PaymentPage() {
               </div>
             )}
 
+            {/* ── CTA section ── */}
             {!isSettled && !isFailed && (
               <div className="flex flex-col gap-3 pt-2">
                 {activeProvider ? (
                   <>
                     <p className="text-center text-xs text-slate-500">
-                      {t("connectedVia", { provider: activeProvider.name })}
+                      {t("connectedVia", {
+                        provider: activeProvider?.name ?? "",
+                      })}
                     </p>
 
                     {pathQuote && !pathQuoteLoading && (
-                      <div className="grid gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setUsePathPayment(false)}
-                          className={`rounded-2xl border px-4 py-4 text-left transition-colors ${
-                            !usePathPayment
-                              ? "border-mint/50 bg-mint/10"
-                              : "border-white/10 bg-black/30 hover:bg-white/5"
-                          }`}
-                        >
-                          <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-                            {t("standardAssetOption", {
-                              asset: payment.asset.toUpperCase(),
-                            })}
-                          </p>
-                          <p className="mt-2 text-lg font-semibold text-white">
-                            {payment.amount} {payment.asset.toUpperCase()}
-                          </p>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => setUsePathPayment(true)}
-                          className={`rounded-2xl border px-4 py-4 text-left transition-colors ${
-                            usePathPayment
-                              ? "border-mint/50 bg-mint/10"
-                              : "border-white/10 bg-black/30 hover:bg-white/5"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
-                                {t("pathPaymentOption")}
-                              </p>
-                              <p className="mt-2 text-lg font-semibold text-white">
-                                {pathQuote.source_amount}{" "}
-                                {pathQuote.source_asset}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-400">
-                                {t("approximateCost")}
-                              </p>
-                            </div>
-                            <span className="rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-mint">
-                              XLM
-                            </span>
+                      <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                          {t("approximateCostLabel")}
+                        </p>
+                        <div className="mt-2 flex items-end justify-between gap-4">
+                          <div>
+                            <p className="text-2xl font-bold text-white">
+                              {Number(pathQuote.source_amount).toLocaleString(
+                                locale,
+                                {
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 7,
+                                },
+                              )}{" "}
+                              {pathQuote.source_asset}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {t("approximateCostHelp", {
+                                amount: pathQuote.destination_amount,
+                                asset: pathQuote.destination_asset,
+                              })}
+                            </p>
                           </div>
-                          <p className="mt-4 text-sm text-slate-300">
-                            {t("merchantReceives", {
-                              amount: pathQuote.destination_amount,
-                              asset: pathQuote.destination_asset,
+                          <p className="text-right text-xs text-slate-500">
+                            {t("slippageBuffer", {
+                              percent: Math.round(pathQuote.slippage * 100),
+                              sendMax: pathQuote.send_max,
+                              asset: pathQuote.source_asset,
                             })}
                           </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {t("quoteBuffer", { amount: pathQuote.send_max })}
-                          </p>
-                          <p className="mt-2 text-xs text-slate-400">
-                            {t("pathPaymentHint")}
-                          </p>
-                        </button>
+                        </div>
                       </div>
                     )}
 
+                    {/* Path payment toggle */}
+                    {pathQuote && !pathQuoteLoading && (
+                      <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={usePathPayment}
+                          onChange={(e) => setUsePathPayment(e.target.checked)}
+                          className="h-4 w-4"
+                          style={{ accentColor: "var(--checkout-primary)" }}
+                        />
+                        <span className="text-sm text-slate-300">
+                          {t("pathPaymentTogglePrefix")}{" "}
+                          <span className="font-semibold text-white">
+                            {pathQuote.source_amount} {pathQuote.source_asset}
+                          </span>{" "}
+                          {t("pathPaymentToggleSuffix")}
+                        </span>
+                      </label>
+                    )}
                     {pathQuoteLoading && (
                       <p className="text-center text-xs text-slate-500">
-                        {t("quoteLoading")}
+                        Checking alternative payment paths…
                       </p>
                     )}
-
                     {pathQuoteError && (
                       <p className="text-center text-xs text-red-400">
                         {pathQuoteError}
@@ -707,17 +959,17 @@ export default function PaymentPage() {
                           {t("processing")}
                         </span>
                       ) : usePathPayment && pathQuote ? (
-                        t("payInXlm")
-                      ) : activeProvider.name ? (
+                        `Pay ${pathQuote.send_max} ${pathQuote.source_asset}`
+                      ) : activeProvider?.name ? (
                         t("payWith", { provider: activeProvider.name })
                       ) : (
                         t("payWithFallback")
                       )}
+                      {/* Glow halo on hover */}
                       <div
                         className="absolute inset-0 -z-10 opacity-0 blur-xl transition-opacity group-hover:opacity-100"
                         style={{
-                          backgroundColor:
-                            "color-mix(in srgb, var(--checkout-primary) 20%, transparent)",
+                          backgroundColor: "var(--checkout-primary-glow)",
                         }}
                       />
                     </button>
@@ -728,34 +980,47 @@ export default function PaymentPage() {
                       process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE ??
                       "Test SDF Network ; September 2015"
                     }
-                    onConnected={() => undefined}
+                    onConnected={() => {}}
                   />
                 )}
               </div>
             )}
 
+            {/* Settled success note */}
             {isSettled && (
-              <div
-                className="rounded-xl border p-4 text-center"
-                style={{
-                  borderColor:
-                    "color-mix(in srgb, var(--checkout-primary) 30%, transparent)",
-                  backgroundColor:
-                    "color-mix(in srgb, var(--checkout-primary) 7%, transparent)",
-                }}
-              >
-                <p
-                  className="text-sm font-semibold"
-                  style={{ color: "var(--checkout-primary)" }}
+              <div className="flex flex-col gap-3">
+                <div
+                  className="rounded-xl border p-4 text-center"
+                  style={{
+                    borderColor: "var(--checkout-primary-border)",
+                    backgroundColor: "var(--checkout-primary-subtle)",
+                  }}
                 >
-                  {t("receivedTitle")}
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  {t("receivedDescription")}
-                </p>
+                  <p
+                    className="text-sm font-semibold"
+                    style={{ color: "var(--checkout-primary)" }}
+                  >
+                    {t("receivedTitle")}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {t("receivedDescription")}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadReceipt}
+                  disabled={isDownloadingReceipt}
+                  className="flex h-11 w-full items-center justify-center rounded-xl border border-white/15 bg-white/5 px-4 text-sm font-semibold text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isDownloadingReceipt
+                    ? t("downloadReceiptLoading")
+                    : t("downloadReceipt")}
+                </button>
               </div>
             )}
 
+            {/* Failed note */}
             {isFailed && (
               <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-center">
                 <p className="text-sm font-semibold text-red-400">
@@ -769,7 +1034,6 @@ export default function PaymentPage() {
           </div>
         </div>
       </main>
-
       <CheckoutQrModal
         isOpen={showQrModal}
         onClose={() => setShowQrModal(false)}

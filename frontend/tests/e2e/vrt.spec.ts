@@ -16,6 +16,22 @@ test.describe("Visual Regression Tests for Core Components", () => {
     expect(await buttonsSection.screenshot()).toMatchSnapshot("buttons-core.png");
   });
 
+  test("Copy button shows premium glitch success feedback", async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "Clipboard permission check is only verified in chromium.");
+
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+
+    const copyButton = page.getByRole("button", { name: "Copy to clipboard" });
+    await expect(copyButton).toBeVisible();
+
+    await copyButton.click();
+
+    await expect(page.getByText("Copied!")).toBeVisible();
+    await expect(copyButton).toHaveScreenshot("copy-button-success.png", {
+      animations: "allow",
+    });
+  });
+
   test("Inputs should match visual baseline", async ({ page }) => {
     const inputsSection = page.locator("#vrt-inputs");
     await expect(inputsSection).toBeVisible();
