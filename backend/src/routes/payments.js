@@ -81,6 +81,30 @@ function applyPaymentFilters(query, req) {
   return query;
 }
 
+/**
+ * Parse `metadata[key]=value` query params and apply JSONB equality filters.
+ *
+ * Each `metadata[key]` entry is translated to a Supabase `.filter()` call
+ * using the `cs` (contains) operator against a single-key JSON object, which
+ * maps to the Postgres `@>` operator on a JSONB column.
+ *
+ * Only safe key names (alphanumeric + _ + -) are accepted to guard against
+ * SQL injection.
+ */
+const SAFE_METADATA_KEY_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function applyMetadataFilters(query, rawQuery) {
+  const metadataParam = rawQuery.metadata;
+  if (!metadataParam || typeof metadataParam !== "object" || Array.isArray(metadataParam)) {
+    return query;
+  }
+  for (const [key, value] of Object.entries(metadataParam)) {
+    if (!SAFE_METADATA_KEY_RE.test(key)) continue;
+    if (typeof value !== "string") continue;
+    query = query.filter("metadata", "cs", JSON.stringify({ [key]: value }));
+  }
+  return query;
+}
 
 function createPaymentsRouter({
   verifyPaymentRateLimit = defaultVerifyPaymentRateLimit,
@@ -670,9 +694,8 @@ function createPaymentsRouter({
       if (clientId) {
         countQuery = countQuery.eq("client_id", clientId);
       }
-      const { count: totalCount, error: countError } = await countQuery;
-
       countQuery = applyPaymentFilters(countQuery, req);
+      countQuery = applyMetadataFilters(countQuery, req.query);
 
       const { count: totalCount, error: countError } = await countQuery;
 
@@ -691,6 +714,8 @@ function createPaymentsRouter({
       if (clientId) {
         dataQuery = dataQuery.eq("client_id", clientId);
       }
+      dataQuery = applyPaymentFilters(dataQuery, req);
+      dataQuery = applyMetadataFilters(dataQuery, req.query);
       const { data: payments, error: dataError } = await dataQuery.range(
         offset,
         offset + limit - 1,
