@@ -77,7 +77,7 @@ export default function MerchantProfileCard() {
             onClick={() => setShowDropdown(false)}
           />
           
-          <div className="absolute right-0 z-50 mt-2 w-64 origin-top-right rounded-2xl border border-white/10 bg-slate-900 p-4 shadow-2xl backdrop-blur">
+          <div className="absolute right-0 z-50 mt-2 w-64 origin-top-right rounded-2xl border border-white/10 bg-black/80 p-4 shadow-2xl backdrop-blur-xl">
             {/* Profile Header */}
             <div className="mb-4 flex items-center gap-3 border-b border-white/10 pb-4">
               <Avatar
