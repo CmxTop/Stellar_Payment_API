@@ -1,5 +1,5 @@
 import "./globals.css";
-import { Space_Grotesk, Space_Mono } from "next/font/google";
+import { Space_Grotesk, Inter, Space_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import ThemeProvider from "@/components/ThemeProvider";
@@ -11,7 +11,8 @@ import { WalletContextProvider } from "@/lib/wallet-context";
 import { DisplayPreferencesProvider } from "@/lib/display-preferences";
 import { Metadata, Viewport } from "next";
 
-const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
+const spaceGrotesk = Space_Grotesk({ subsets: ["latin"], variable: "--font-heading", display: "swap" });
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const spaceMono = Space_Mono({ subsets: ["latin"], weight: ["400", "700"], variable: "--font-mono", display: "swap" });
 
 export const metadata: Metadata = {
@@ -58,7 +59,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           }}
         />
       </head>
-      <body className={`${spaceGrotesk.variable} ${spaceMono.variable} min-h-screen font-sans`}>
+      <body className={`${spaceGrotesk.variable} ${inter.variable} ${spaceMono.variable} min-h-screen font-sans`}>
         <NextIntlClientProvider locale={locale} messages={messages}>
           <ThemeProvider>
             <DisplayPreferencesProvider>

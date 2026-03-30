@@ -20,27 +20,29 @@ html {
   color-scheme: light;
   --color-night: #f1f5f9;
   --color-tide: #e2e8f0;
-  --color-mint: #0f766e; /* Darker mint alias (Teal 700) for readability on light bg */
+  --color-mint: #0f766e;
   --color-glow: #0d9488;
-  --font-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --color-primary: #0B0F1A;
+  --color-secondary: #6C5CE7;
+  --color-accent: #00F5D4;
+  --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "Cascadia Code", Consolas, "SFMono-Regular", monospace;
+  --font-heading: "Space Grotesk", system-ui, sans-serif;
 }
 
 :root.dark {
   color-scheme: dark;
-  --color-night: #000000;
-  --color-tide: #0a0a0a;
-  --color-mint: #5ef2c0;
-  --color-glow: #b8ffe2;
+  --color-night: #0B0F1A;
+  --color-tide: #131A2B;
+  --color-mint: #00F5D4;
+  --color-glow: #6C5CE7;
+  --color-primary: #0B0F1A;
+  --color-secondary: #6C5CE7;
+  --color-accent: #00F5D4;
 }
 
 body {
-  background: radial-gradient(
-    1200px circle at 10% -10%,
-    #d9e8ff 0%,
-    #f5f8ff 45%,
-    #eef3ff 100%
-  );
+  background: #ffffff;
   color: #0f172a;
   background-attachment: fixed;
 }
@@ -48,9 +50,9 @@ body {
 .dark body {
   background: radial-gradient(
     1200px circle at 10% -10%,
-    #0a1628 0%,
-    #000000 45%,
-    #000000 100%
+    #0d1526 0%,
+    #0B0F1A 45%,
+    #0B0F1A 100%
   );
   color: #f3f5f7;
   background-attachment: fixed;
