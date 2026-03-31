@@ -83,7 +83,7 @@ export async function login(
   password: string
 ): Promise<MerchantSession> {
   const apiUrl =
-    process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+    process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
   const res = await fetch(`${apiUrl}/api/auth/login`, {
     method: "POST",
@@ -107,14 +107,15 @@ export async function login(
 export async function registerMerchant(
   email: string,
   business_name: string,
-  notification_email: string
+  notification_email: string,
+  password: string,
 ): Promise<{ message: string; merchant: Merchant }> {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
   const res = await fetch(`${apiUrl}/api/register-merchant`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, business_name, notification_email }),
+    body: JSON.stringify({ email, business_name, notification_email, password }),
   });
 
   if (!res.ok) {

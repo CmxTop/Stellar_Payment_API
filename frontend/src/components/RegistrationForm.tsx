@@ -106,6 +106,7 @@ export default function RegistrationForm() {
         emailTrimmed,
         businessNameTrimmed,
         notificationEmailTrimmed,
+        password,
       );
       setRegisteredMerchant(data.merchant);
       setApiKey(data.merchant.api_key);

@@ -1,5 +1,5 @@
 import { pool } from "./db.js";
-import logger from "./logger.js"; // Assuming a pino logger exists
+import { logger } from "./logger.js";
 
 /**
  * Archives payment intents from the 'payments' table that are older than 90 days.

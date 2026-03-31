@@ -66,14 +66,11 @@ export function createMerchantRegistrationRateLimit({
     },
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { ip: false },
     requestWasSuccessful: (req, res) => {
       setStandardRateLimitHeaders(res, req.rateLimit);
       return res.statusCode < 400;
     },
     store,
-    keyGenerator: (req) => {
-      // Rate limit by IP address
-      return req.ip || req.connection.remoteAddress;
-    },
   });
 }

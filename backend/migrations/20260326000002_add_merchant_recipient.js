@@ -3,9 +3,12 @@
  */
 
 export async function up(knex) {
-  await knex.schema.alterTable("merchants", (t) => {
-    t.text("recipient");
-  });
+  const hasRecipient = await knex.schema.hasColumn("merchants", "recipient");
+  if (!hasRecipient) {
+    await knex.schema.alterTable("merchants", (t) => {
+      t.text("recipient");
+    });
+  }
   await knex.raw(
     "create index if not exists merchants_recipient_idx on merchants(recipient)"
   );

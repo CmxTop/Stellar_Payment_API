@@ -4,10 +4,12 @@ import "dotenv/config";
 const config = {
   client: "pg",
   connection: {
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL?.includes("supabase.co")
-      ? { rejectUnauthorized: false }
-      : false,
+    host: 'db.xomasbwwhhcxrptfdees.supabase.co',
+    user: 'postgres',
+    database: 'postgres',
+    password: 'pluto1234!@#$%^_',
+    port: 6543,
+    ssl: { rejectUnauthorized: false },
   },
   migrations: {
     directory: "./migrations",

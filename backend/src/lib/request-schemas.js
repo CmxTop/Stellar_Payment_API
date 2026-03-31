@@ -152,6 +152,9 @@ export const registerMerchantZodSchema = z.object({
     .trim()
     .min(1, "email is required")
     .email("Invalid email format"),
+  password: z
+    .string({ required_error: "password is required" })
+    .min(8, "password must be at least 8 characters"),
   business_name: optionalTrimmedString(),
   notification_email: optionalTrimmedString().refine((value) => {
     if (!value) {

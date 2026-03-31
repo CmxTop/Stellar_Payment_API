@@ -179,36 +179,27 @@ export async function createApp({ redisClient }) {
    *                   type: boolean
    */
   app.get("/health", async (req, res) => {
-    try {
-      const [dbResult, horizonReachable] = await Promise.all([
-        supabase.from("merchants").select("id").limit(1),
-        isHorizonReachable(),
-      ]);
+    const [dbResult, horizonReachable] = await Promise.allSettled([
+      supabase.from("merchants").select("id").limit(1),
+      isHorizonReachable(),
+    ]);
 
-      if (dbResult.error) {
-        return res.status(503).json({
-          ok: false,
-          error: "Database unavailable",
-          horizon_reachable: horizonReachable,
-        });
-      }
-
-      if (!horizonReachable) {
-        return res.status(503).json({
-          ok: false,
-          error: "Horizon unavailable",
-          horizon_reachable: false,
-        });
-      }
-
-      res.json({ ok: true, horizon_reachable: true });
-    } catch {
-      res.status(503).json({
-        ok: false,
-        error: "Health check failed",
-        horizon_reachable: false,
-      });
+    const dbOk = dbResult.status === "fulfilled" && !dbResult.value?.error;
+    if (!dbOk) {
+      console.error("Health DB error:", JSON.stringify(dbResult.reason || dbResult.value?.error));
     }
+    const horizonOk = horizonReachable.status === "fulfilled" && horizonReachable.value === true;
+
+    const status = dbOk && horizonOk ? 200 : 503;
+
+    res.status(status).json({
+      ok: dbOk && horizonOk,
+      services: {
+        database: dbOk ? "ok" : "unavailable",
+        horizon: horizonOk ? "ok" : "unavailable",
+        redis: "ok",
+      },
+    });
   });
 
   const verifyPaymentRateLimit = createVerifyPaymentRateLimit({

@@ -2,15 +2,30 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { login, saveToken } from "@/lib/auth";
 
 export default function LoginForm() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Login submitted", { email, password, rememberMe });
+    setError(null);
+    setLoading(true);
+
+    try {
+      await login(email, password);
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -19,6 +34,12 @@ export default function LoginForm() {
         <h2 className="text-4xl font-bold tracking-tight text-[#0A0A0A] mb-4 uppercase">Welcome Back</h2>
         <p className="text-sm font-medium text-[#6B6B6B]">Sign in to your professional PLUTO dashboard.</p>
       </div>
+
+      {error && (
+        <div className="mb-6 rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 font-medium">
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-6">
         <div className="flex flex-col gap-2">
@@ -87,9 +108,10 @@ export default function LoginForm() {
 
         <button
           type="submit"
-          className="mt-6 flex w-full justify-center rounded-2xl bg-[#0A0A0A] py-5 text-[10px] font-bold uppercase tracking-[0.3em] text-white shadow-xl shadow-black/10 transition-all hover:bg-black active:scale-[0.98]"
+          disabled={loading}
+          className="mt-6 flex w-full justify-center rounded-2xl bg-[#0A0A0A] py-5 text-[10px] font-bold uppercase tracking-[0.3em] text-white shadow-xl shadow-black/10 transition-all hover:bg-black active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Sign in to PLUTO
+          {loading ? "Signing in..." : "Sign in to PLUTO"}
         </button>
       </form>
 

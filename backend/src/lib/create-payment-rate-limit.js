@@ -67,6 +67,7 @@ export function createCreatePaymentRateLimit({
     max: config.max,
     standardHeaders: true,
     legacyHeaders: false,
+    validate: { ip: false },
     keyGenerator: getCreatePaymentRateLimitKey,
     requestWasSuccessful(req, res) {
       if (typeof req.rateLimit?.limit === "number") {

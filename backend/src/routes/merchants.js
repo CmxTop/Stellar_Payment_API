@@ -2,7 +2,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import { randomBytes } from "crypto";
 import { supabase } from "../lib/supabase.js";
-import { requireApiKeyAuth, requireSessionAuth } from "../lib/auth.js";
+import { requireApiKeyAuth, requireSessionAuth, hashPassword } from "../lib/auth.js";
 import { getMerchantApiUsage } from "../lib/api-usage.js";
 import { z } from "zod";
 import { validateRequest } from "../lib/validation.js";
@@ -14,6 +14,7 @@ import {
   VALID_WEBHOOK_EVENTS,
 } from "../lib/request-schemas.js";
 import { merchantService } from "../services/merchantService.js";
+import { resolveMerchantSettings } from "../lib/merchant-settings.js";
 import { renderReceiptEmail } from "../lib/email-templates.js";
 import {
   createWebhookDomainVerificationState,
@@ -141,6 +142,7 @@ function createMerchantsRouter({
         // Generate secure credentials
         const apiKey = `sk_${randomBytes(24).toString("hex")}`;
         const webhookSecret = `whsec_${randomBytes(24).toString("hex")}`;
+        const password_hash = await hashPassword(body.password);
 
         const payload = {
           email,
@@ -148,6 +150,7 @@ function createMerchantsRouter({
           notification_email,
           api_key: apiKey,
           webhook_secret: webhookSecret,
+          password_hash,
           merchant_settings: resolveMerchantSettings(body.merchant_settings),
           metadata: body.metadata ?? null,
           created_at: new Date().toISOString(),
@@ -159,10 +162,12 @@ function createMerchantsRouter({
           .select()
           .single();
 
-        if (insertError) {
-          insertError.status = 500;
-          throw insertError;
-        }
+    if (insertError) {
+      console.error("Supabase insert error:", JSON.stringify(insertError));
+      console.error("Supabase insert error details:", insertError.message, insertError.code, insertError.hint);
+      insertError.status = 500;
+      throw insertError;
+    }
 
         res.status(201).json({
           message: "Merchant registered successfully",
