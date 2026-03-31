@@ -1,4 +1,4 @@
-# Stellar Payment API
+# PLUTO API
 
 Accept Stellar payments (XLM or Stellar assets like USDC) using simple payment links and a developer-friendly API.
 
@@ -28,7 +28,7 @@ This project aims to feel like Stripe/PayPal, but built on Stellar. Merchants cr
 ## Quick Start (Backend)
 
 1. Install dependencies:
-```bash
+```bash 
 cd backend
 npm install
 ```
